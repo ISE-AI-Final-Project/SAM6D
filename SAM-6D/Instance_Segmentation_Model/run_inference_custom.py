@@ -159,6 +159,8 @@ def run_inference(segmentor_model, output_dir, cad_path, rgb_path, depth_path, c
                 ).unsqueeze(0).data
     
     # run inference
+    logging.info("Running inference")
+
     rgb = Image.open(rgb_path).convert("RGB")
     detections = model.segmentor_model.generate_masks(np.array(rgb))
     detections = Detections(detections)
@@ -197,6 +199,8 @@ def run_inference(segmentor_model, output_dir, cad_path, rgb_path, depth_path, c
         )
 
     # final score
+    logging.info("Saving results")
+
     final_score = (semantic_score + appe_scores + geometric_score*visible_ratio) / (1 + 1 + visible_ratio)
 
     detections.add_attribute("scores", final_score)

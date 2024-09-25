@@ -38,8 +38,8 @@ model:
     sim_type: cosine
     normalize_feat: True
     loss_dis_thres: 0.15
-    nproposal1: 6000
-    nproposal2: 300
+    nproposal1: 2000 #6000
+    nproposal2: 100 #300
   fine_point_matching:
     nblock: 3
     input_dim: 256

@@ -171,6 +171,14 @@ def get_test_data(rgb_path, depth_path, cam_path, cad_path, seg_path, det_score_
             dets.append(det)
     del dets_
 
+
+    # Sort detections by score in descending order
+    sorted_dets = sorted(dets, key=lambda x: x['score'], reverse=True)
+
+    # Get the top 10 detections
+    dets = sorted_dets[:1]
+
+
     cam_info = json.load(open(cam_path))
     K = np.array(cam_info['cam_K']).reshape(3, 3)
 
