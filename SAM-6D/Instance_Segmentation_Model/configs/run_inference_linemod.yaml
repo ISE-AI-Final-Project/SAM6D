@@ -1,5 +1,5 @@
-SEGMENTOR_MODEL: sam # The segmentor model in ISM
-OUTPUT_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/linemod-ism-eval # Path to root directory of the output
+SEGMENTOR_MODEL: fastsam # The segmentor model in ISM (sam , fastsam)
+OUTPUT_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/linemod-ism-eval-fastsam # Path to root directory of the output
 # CAD_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/obj_000005.ply # Path to CAD(mm)
 # RGB_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/rgb.png # Path to RGB image
 # DEPTH_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/depth.png # Path to Depth image(mm)

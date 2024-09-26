@@ -40,20 +40,28 @@ import yaml
 import sys
 import time
 
-def progressbar(it, prefix="", size=60, out=sys.stdout): # Python3.6+
+
+def progressbar(it, prefix="", size=60, out=sys.stdout):  # Python3.6+
     count = len(it)
-    start = time.time() # time estimate start
+    start = time.time()  # time estimate start
+
     def show(j):
-        x = int(size*j/count)
+        x = int(size * j / count)
         # time estimate calculation and string
-        remaining = ((time.time() - start) / j) * (count - j)        
-        mins, sec = divmod(remaining, 60) # limited to minutes
+        remaining = ((time.time() - start) / j) * (count - j)
+        mins, sec = divmod(remaining, 60)  # limited to minutes
         time_str = f"{int(mins):02}:{sec:03.1f}"
-        print(f"{prefix}[{u'█'*x}{('.'*(size-x))}] {j}/{count} Est wait {time_str}", end='\r', file=out, flush=True)
-    show(0.1) # avoid div/0 
+        print(
+            f"{prefix}[{u'█'*x}{('.'*(size-x))}] {j}/{count} Est wait {time_str}",
+            end="\r",
+            file=out,
+            flush=True,
+        )
+
+    show(0.1)  # avoid div/0
     for i, item in enumerate(it):
         yield item
-        show(i+1)
+        show(i + 1)
     print("\n", flush=True, file=out)
 
 
@@ -195,15 +203,26 @@ def init_template(model, template_dir, obj_id="01"):
 def run_inference(
     model, device, output_dir, data_dir, cad_dir, obj_id="01", image_id="0001"
 ):
+    start = time.time()
+
+    # print()
+    def log(i, p=False):
+        if p:
+            print(i, time.time() - start)
+            return time.time()
+
     # run inference
     # logging.info(f"Running inference OBJ:{obj_id} IMAGE:{image_id}")
 
     rgb = Image.open(f"{data_dir}/{obj_id}/rgb/{image_id}.png").convert("RGB")
     detections = model.segmentor_model.generate_masks(np.array(rgb))
+    # log(0)
     detections = Detections(detections)
+    start = log("Segment")
     query_decriptors, query_appe_descriptors = model.descriptor_model.forward(
         np.array(rgb), detections
     )
+    start = log("Forward Desciptor")
 
     # matching descriptors
     (
@@ -213,6 +232,8 @@ def run_inference(
         best_template,
     ) = model.compute_semantic_score(query_decriptors)
 
+    start = log("Compute sem score")
+
     # update detections
     detections.filter(idx_selected_proposals)
     query_appe_descriptors = query_appe_descriptors[idx_selected_proposals, :]
@@ -221,26 +242,33 @@ def run_inference(
     appe_scores, ref_aux_descriptor = model.compute_appearance_score(
         best_template, pred_idx_objects, query_appe_descriptors
     )
+    start = log("Compute app score")
 
     # compute the geometric score
     depth_path = f"{data_dir}/{obj_id}/depth/{image_id}.png"
     cam_path = f"{data_dir}/{obj_id}/info.yml"
     batch = batch_input_data(depth_path, cam_path, device, image_id=image_id)
+    start = log("Batch depth input")
 
     template_poses = get_obj_poses_from_template_level(level=2, pose_distribution="all")
     template_poses[:, :3, 3] *= 0.4
     poses = torch.tensor(template_poses).to(torch.float32).to(device)
     model.ref_data["poses"] = poses[load_index_level_in_level2(0, "all"), :, :]
 
+    start = log("Get obj pose")
     mesh = trimesh.load_mesh(f"{cad_dir}/obj_{obj_id}.ply")
     model_points = mesh.sample(2048).astype(np.float32) / 1000.0
     model.ref_data["pointcloud"] = (
         torch.tensor(model_points).unsqueeze(0).data.to(device)
     )
 
+    start = log("Load mesh")
+
     image_uv = model.project_template_to_image(
         best_template, pred_idx_objects, batch, detections.masks
     )
+
+    start = log("Project template")
 
     geometric_score, visible_ratio = model.compute_geometric_score(
         image_uv,
@@ -249,6 +277,7 @@ def run_inference(
         ref_aux_descriptor,
         visible_thred=model.visible_thred,
     )
+    start = log("Compute geo score")
 
     # final score
     # logging.info(f"Saving results OBJ:{obj_id} IMAGE:{image_id}")
@@ -271,6 +300,8 @@ def run_inference(
     detections.save_to_file(0, 0, 0, save_path, "Custom", return_results=False)
     # detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
     # save_json_bop23(save_path + ".json", detections)
+
+    start = log("Save output")
 
     if int(image_id) % 100 == 0:
         detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
@@ -304,14 +335,14 @@ if __name__ == "__main__":
     )
 
     # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
-    for obj in [2]:
+    for obj in [5]:
         obj_id = str(obj).zfill(2)
         num_image = len(os.listdir(f'{config["DATA_DIR"]}/{obj_id}/rgb'))
         # print(num_image)
 
         init_template(sam6d_model, template_dir=config["TEMPLATE_DIR"], obj_id=obj_id)
 
-        for img in progressbar(range(0, num_image), f"Inferencing OBJ {obj}: ", 40):
+        for img in progressbar(range(243, 252), f"Inferencing OBJ {obj}: ", 40):
             image_id = str(img).zfill(4)
             run_inference(
                 sam6d_model,
