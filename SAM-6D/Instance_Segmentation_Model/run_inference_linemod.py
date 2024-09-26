@@ -335,14 +335,14 @@ if __name__ == "__main__":
     )
 
     # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
-    for obj in [5]:
+    for obj in config['OBJ_ID']:
         obj_id = str(obj).zfill(2)
         num_image = len(os.listdir(f'{config["DATA_DIR"]}/{obj_id}/rgb'))
         # print(num_image)
 
         init_template(sam6d_model, template_dir=config["TEMPLATE_DIR"], obj_id=obj_id)
 
-        for img in progressbar(range(243, 252), f"Inferencing OBJ {obj}: ", 40):
+        for img in progressbar(range(0, num_image), f"Inferencing OBJ {obj}: ", 40):
             image_id = str(img).zfill(4)
             run_inference(
                 sam6d_model,
