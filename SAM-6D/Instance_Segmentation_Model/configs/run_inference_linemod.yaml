@@ -1,10 +1,7 @@
 SEGMENTOR_MODEL: fastsam # The segmentor model in ISM (sam , fastsam)
 OUTPUT_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/linemod-ism-eval-fastsam # Path to root directory of the output
-# CAD_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/obj_000005.ply # Path to CAD(mm)
-# RGB_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/rgb.png # Path to RGB image
-# DEPTH_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/depth.png # Path to Depth image(mm)
-# CAMERA_PATH: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/Example/camera.json # Path to camera information
 TEMPLATE_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/linemod-ism-eval/templates
 STABILITY_SCORE_THRESH : 0.97 # stability_score_thresh of SAM
 DATA_DIR: /home/icetenny/senior-1/Linemod_preprocessed/data
 CAD_DIR: /home/icetenny/senior-1/Linemod_preprocessed/models
+OBJ_ID: [1, 2, 4, 5] # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
