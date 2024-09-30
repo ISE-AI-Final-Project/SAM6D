@@ -4,3 +4,4 @@ SAM-6D/Data/*
 !*.placeholder
 *.pth
 *.pt
+*/test/*

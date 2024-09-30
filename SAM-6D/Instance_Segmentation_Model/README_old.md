@@ -44,20 +44,22 @@ python download_dinov2.py
 ```
 
 
-## [Senior] Evaluation on LineMod Datasets
+## Evaluation on BOP Datasets
 
-To evaluate the model on LineMod datasets, please run the following commands:
+To evaluate the model on BOP datasets, please run the following commands:
 
-##### 1) Run inference script to optain .npz files. Example of inference config file can be seen in `configs/inference/run_inference_linemod_example.yaml`
 ```
-python3 run_inference_linemod.py --config <path/to/inference/config>
+# Specify a specific GPU
+export CUDA_VISIBLE_DEVICES=0
+
+# with sam
+python run_inference.py dataset_name=$DATASET
+
+# with fastsam
+python run_inference.py dataset_name=$DATASET model=ISM_fastsam
 ```
 
-
-##### 2) Run evaluation script on .npz files and groud truth images to obtain metrics. Example of inference config file can be seen in `configs/eval/run_eval_linemod_example.yaml`
-```
-python3 run_eval_linemod.py --config <path/to/eval/config>
-```
+The string "DATASET" could be set as `lmo`, `icbin`, `itodd`, `hb`, `tless`, `tudl` or `ycbv`.
 
 
 ## Acknowledgements

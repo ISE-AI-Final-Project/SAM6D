@@ -4,4 +4,5 @@ TEMPLATE_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/linemod-ism-eval/templa
 STABILITY_SCORE_THRESH : 0.97 # stability_score_thresh of SAM
 DATA_DIR: /home/icetenny/senior-1/Linemod_preprocessed/data
 CAD_DIR: /home/icetenny/senior-1/Linemod_preprocessed/models
-OBJ_ID: [1, 2, 4, 5] # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+OBJ_ID: [2] # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+VISUALIZE_EVERY_N: 100 # Save visualized image every n images

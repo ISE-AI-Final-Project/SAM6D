@@ -1,47 +1,36 @@
-import os, sys
-import numpy as np
-import shutil
-from tqdm import tqdm
-import time
-import torch
-from PIL import Image
-import logging
-import os, sys
-import os.path as osp
-from hydra import initialize, compose
-
-# set level logging
-logging.basicConfig(level=logging.INFO)
-import logging
-import trimesh
-import numpy as np
-from hydra.utils import instantiate
 import argparse
 import glob
-from omegaconf import DictConfig, OmegaConf
-from torchvision.utils import save_image
-import torchvision.transforms as T
+import logging
+import os
+import sys
+import time
+
 import cv2
-import imageio
 import distinctipy
+import imageio
+import numpy as np
+import torch
+import trimesh
+import yaml
+from hydra import compose, initialize
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
+from PIL import Image
 from skimage.feature import canny
 from skimage.morphology import binary_dilation
-from segment_anything.utils.amg import rle_to_mask
 
+from model.utils import Detections, convert_npz_to_json
+from segment_anything.utils.amg import rle_to_mask
+from utils.bbox_utils import CropResizePad
 from utils.poses.pose_utils import (
     get_obj_poses_from_template_level,
     load_index_level_in_level2,
 )
-from utils.bbox_utils import CropResizePad
-from model.utils import Detections, convert_npz_to_json
-from model.loss import Similarity
-from utils.inout import load_json, save_json_bop23
-import yaml
-import sys
-import time
+
+logging.basicConfig(level=logging.INFO)
 
 
-def progressbar(it, prefix="", size=60, out=sys.stdout):  # Python3.6+
+def progressbar(it, prefix="", size=60, out=sys.stdout):
     count = len(it)
     start = time.time()  # time estimate start
 
@@ -123,6 +112,7 @@ def batch_input_data(depth_path, cam_path, device, image_id="0001"):
 
 
 def init_sam6d(segmentor_model, stability_score_thresh):
+    # Init SAM 6D Model
     with initialize(version_base=None, config_path="configs"):
         cfg = compose(config_name="run_inference.yaml")
 
@@ -157,6 +147,7 @@ def init_sam6d(segmentor_model, stability_score_thresh):
 
 
 def init_template(model, template_dir, obj_id="01"):
+    # Init Template with obj id
     logging.info(f"Initializing template OBJ:{obj_id}")
     template_dir = os.path.join(template_dir, obj_id, "templates")
     num_templates = len(glob.glob(f"{template_dir}/*.npy"))
@@ -201,8 +192,16 @@ def init_template(model, template_dir, obj_id="01"):
 
 
 def run_inference(
-    model, device, output_dir, data_dir, cad_dir, obj_id="01", image_id="0001"
+    model,
+    device,
+    output_dir,
+    data_dir,
+    cad_dir,
+    obj_id="01",
+    image_id="0001",
+    visualize_every_n=100,
 ):
+    # Run inference
     start = time.time()
 
     # print()
@@ -212,9 +211,8 @@ def run_inference(
             return time.time()
 
     # run inference
-    # logging.info(f"Running inference OBJ:{obj_id} IMAGE:{image_id}")
-
-    rgb = Image.open(f"{data_dir}/{obj_id}/rgb/{image_id}.png").convert("RGB")
+    rgb_path = os.path.join(data_dir, obj_id, "rgb", f"{image_id}.png")
+    rgb = Image.open(rgb_path).convert("RGB")
     detections = model.segmentor_model.generate_masks(np.array(rgb))
     # log(0)
     detections = Detections(detections)
@@ -245,8 +243,8 @@ def run_inference(
     start = log("Compute app score")
 
     # compute the geometric score
-    depth_path = f"{data_dir}/{obj_id}/depth/{image_id}.png"
-    cam_path = f"{data_dir}/{obj_id}/info.yml"
+    depth_path = os.path.join(data_dir, obj_id, "depth", f"{image_id}.png")
+    cam_path = os.path.join(data_dir, obj_id, "info.yml")
     batch = batch_input_data(depth_path, cam_path, device, image_id=image_id)
     start = log("Batch depth input")
 
@@ -256,7 +254,8 @@ def run_inference(
     model.ref_data["poses"] = poses[load_index_level_in_level2(0, "all"), :, :]
 
     start = log("Get obj pose")
-    mesh = trimesh.load_mesh(f"{cad_dir}/obj_{obj_id}.ply")
+    mesh_path = os.path.join(cad_dir, f"obj_{obj_id}.ply")
+    mesh = trimesh.load_mesh(mesh_path)
     model_points = mesh.sample(2048).astype(np.float32) / 1000.0
     model.ref_data["pointcloud"] = (
         torch.tensor(model_points).unsqueeze(0).data.to(device)
@@ -292,18 +291,20 @@ def run_inference(
     detections.to_numpy()
 
     # Create Folder
-    obj_output_dir = f"{output_dir}/sam6d_results/{obj_id}"
+    obj_output_dir = os.path.join(output_dir, "sam6d_results", obj_id)
     if not os.path.exists(obj_output_dir):
         os.makedirs(obj_output_dir)
 
-    save_path = f"{obj_output_dir}/detection_ism_{image_id}"
+    save_path = os.path.join(obj_output_dir, f"detection_ism_{image_id}")
     detections.save_to_file(0, 0, 0, save_path, "Custom", return_results=False)
+
+    # Converot to json
     # detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
     # save_json_bop23(save_path + ".json", detections)
 
     start = log("Save output")
 
-    if int(image_id) % 100 == 0:
+    if int(image_id) % visualize_every_n == 0:
         detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
 
         vis_img = visualize(rgb, detections, f"{obj_output_dir}/vis_ism_{image_id}.png")
@@ -312,22 +313,19 @@ def run_inference(
 
 if __name__ == "__main__":
 
-    # cam_path = f'/home/icetenny/senior-1/Linemod_preprocessed/data/01/info.yml'
-    # cam_dict = load_yaml(cam_path)
-    # print(cam_dict)
-    # exit()
+    # Parse Argument
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--fname",
-        default="configs/run_inference_linemod.yaml",
+        "--config",
+        default="configs/inference/run_inference_linemod.yaml",
         help="Path to inference config yaml file",
     )
 
     args = parser.parse_args()
 
-    config = load_yaml(args.fname)
+    config = load_yaml(args.config)
 
-    os.makedirs(f"{config['OUTPUT_DIR']}/sam6d_results", exist_ok=True)
+    os.makedirs(os.path.join(config["OUTPUT_DIR"], "sam6d_results"), exist_ok=True)
 
     sam6d_model, device = init_sam6d(
         config["SEGMENTOR_MODEL"],
@@ -335,10 +333,13 @@ if __name__ == "__main__":
     )
 
     # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
-    for obj in config['OBJ_ID']:
+    for obj in config["OBJ_ID"]:
         obj_id = str(obj).zfill(2)
-        num_image = len(os.listdir(f'{config["DATA_DIR"]}/{obj_id}/rgb'))
-        # print(num_image)
+
+        # Get number of image
+        obj_data_path = os.path.join(config["DATA_DIR"], obj_id, "rgb")
+        num_image = len(os.listdir(obj_data_path))
+        print("Num Images", num_image)
 
         init_template(sam6d_model, template_dir=config["TEMPLATE_DIR"], obj_id=obj_id)
 
@@ -352,6 +353,7 @@ if __name__ == "__main__":
                 config["CAD_DIR"],
                 obj_id=obj_id,
                 image_id=image_id,
+                visualize_every_n=config["VISUALIZE_EVERY_N"],
             )
 
             torch.cuda.empty_cache()
