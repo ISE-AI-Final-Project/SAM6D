@@ -1,4 +1,4 @@
-SEGMENTOR_MODEL: sam # The segmentor model in ISM (sam , fastsam)
+SEGMENTOR_MODEL: fastsam # The segmentor model in ISM (sam , fastsam)
 OUTPUT_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/test # Path to root directory of the output
 TEMPLATE_DIR: /home/icetenny/senior-1/SAM-6D/SAM-6D/Data/linemod-ism-eval/templates
 STABILITY_SCORE_THRESH : 0.97 # stability_score_thresh of SAM

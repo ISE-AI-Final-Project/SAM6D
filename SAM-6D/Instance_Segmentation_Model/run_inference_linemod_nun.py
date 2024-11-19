@@ -21,6 +21,7 @@ from segment_anything.utils.amg import rle_to_mask
 from skimage.feature import canny
 from skimage.morphology import binary_dilation
 from utils.bbox_utils import CropResizePad
+from utils.depth_processing import depth_image_process, intersec_mask_rgbd
 from utils.poses.pose_utils import (
     get_obj_poses_from_template_level,
     load_index_level_in_level2,
@@ -64,6 +65,13 @@ def visualize(rgb, detections, save_path="tmp.png"):
     img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
     colors = distinctipy.get_colors(len(detections))
     alpha = 0.33
+
+    if len(detections) == 0:
+        # print("No Detection")
+        img = np.array(img)
+        concat = Image.new("RGB", (img.shape[1], img.shape[0]))
+        concat.paste(rgb, (0, 0))
+        return concat
 
     best_score = 0.0
     for mask_idx, det in enumerate(detections):
@@ -214,11 +222,22 @@ def run_inference(
     rgb = Image.open(rgb_path).convert("RGB")
     detections = model.segmentor_model.generate_masks(np.array(rgb))
 
-    # print(detections)
-    print(detections["masks"].shape, detections["boxes"].shape)
+    # Depth segment
+    depth_path = os.path.join(data_dir, obj_id, "depth", f"{image_id}.png")
+    depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+    processed_depth = depth_image_process(depth_image)
+
+    detections_depth = model.segmentor_model.generate_masks(np.array(processed_depth))
+
+    # Combine RGB and Depth
+    detections_combined = intersec_mask_rgbd(detections, detections_depth)
+
+    # print(detections["masks"].shape, detections["boxes"].shape)
+    # print(detections_depth["masks"].shape, detections_depth["boxes"].shape)
+    # print(detections_combined["masks"].shape, detections_combined["boxes"].shape)
 
     # log(0)
-    detections = Detections(detections)
+    detections = Detections(detections_combined)
     log("Segment")
     query_decriptors, query_appe_descriptors = model.descriptor_model.forward(
         np.array(rgb), detections
@@ -312,6 +331,8 @@ def run_inference(
 
         vis_img = visualize(rgb, detections, f"{obj_output_dir}/vis_ism_{image_id}.png")
         vis_img.save(f"{obj_output_dir}/vis_ism_{image_id}.png")
+
+    # exit()
 
 
 if __name__ == "__main__":
