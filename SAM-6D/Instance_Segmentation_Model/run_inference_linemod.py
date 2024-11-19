@@ -14,13 +14,12 @@ import trimesh
 import yaml
 from hydra import compose, initialize
 from hydra.utils import instantiate
+from model.utils import Detections, convert_npz_to_json
 from omegaconf import OmegaConf
 from PIL import Image
+from segment_anything.utils.amg import rle_to_mask
 from skimage.feature import canny
 from skimage.morphology import binary_dilation
-
-from model.utils import Detections, convert_npz_to_json
-from segment_anything.utils.amg import rle_to_mask
 from utils.bbox_utils import CropResizePad
 from utils.poses.pose_utils import (
     get_obj_poses_from_template_level,
@@ -214,6 +213,15 @@ def run_inference(
     rgb_path = os.path.join(data_dir, obj_id, "rgb", f"{image_id}.png")
     rgb = Image.open(rgb_path).convert("RGB")
     detections = model.segmentor_model.generate_masks(np.array(rgb))
+
+    # print(detections)
+    print(detections["masks"].shape, detections["boxes"].shape)
+
+    import json
+
+    with open("detected.txt", "w") as text_file:
+        for key, value in detections.items():
+            text_file.write(f"{key}: {value}\n")
     # log(0)
     detections = Detections(detections)
     start = log("Segment")
