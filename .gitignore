@@ -5,3 +5,4 @@ SAM-6D/Data/*
 *.pth
 *.pt
 */test/*
+.ipynb_checkpoints/

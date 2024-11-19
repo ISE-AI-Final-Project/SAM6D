@@ -82,7 +82,7 @@ def compute_metrics(mask1, mask2):
         "Specificity": Specificity,
     }
 
-
+        
 def main(config):
     # Init eval result df
     results_df = pd.DataFrame(
@@ -95,12 +95,25 @@ def main(config):
             "Precision",
             "Recall",
             "Specificity",
+            "Score",
         ]
-    )
 
     for obj_id in config["OBJ_ID"]:
+        info_results_df = pd.DataFrame(
+        columns=[
+            "Object_id",
+            "Img_id",
+            "Mask_id",
+            "IoU",
+            "Score",
+            "Geo_scores",
+            "Sem_score",
+            "App_score"
+        ]
+    )
+ 
         obj_id = str(obj_id).zfill(2)
-        obj_result_dir = os.path.join(config["RESULT_DIR"], "sam6d_results", obj_id)
+        obj_result_dir = os.path.join(config["RESULT_DIR"], "sam6d_results_01", obj_id)
 
         mean_metrics = {
             "IoU": [],
@@ -135,20 +148,42 @@ def main(config):
             # Best score mask
             best_iou = -1
             best_mask = None
+            # for mask_pred in results["segmentation"]:
+            #     iou = calculate_iou(mask_pred, mask_gt)
+
+            #     if best_iou < iou:
+            #         best_iou = iou
+            #         best_mask = mask_pred
+            best_idx = np.argmax(results['scores'])
+            pred_mask = results['segmentation'][best_idx]
+
+            mask_id = 0 
             for mask_pred in results["segmentation"]:
                 iou = calculate_iou(mask_pred, mask_gt)
+                new_info =  { "Object_id": obj_id,
+                            "Img_id": img_id,  # Add corresponding values
+                            "Mask_id": mask_id,  # Add corresponding values
+                            "IoU": iou,
+                            "Score": mean_results.get("Score", None),
+                            "Geo_scores": mean_results.get("Geo_scores", None),
+                            "Sem_score": mean_results.get("Sem_score", None),
+                            "App_score": mean_results.get("App_score", None) }
+                              
+                info_results_df = pd.concat(
+                    [info_results_df, pd.DataFrame(new_info, index=[0])], ignore_index=True
+                
+                mask_id = mask_id + 1
 
-                if best_iou < iou:
-                    best_iou = iou
-                    best_mask = mask_pred
-            # best_idx = np.argmax(results['score'])
-            # pred_mask = results['segmentation'][best_idx]
-
-            metrics = compute_metrics(best_mask, mask_gt)
+    
+            metrics = compute_metrics(pred_mask, mask_gt)
 
             # Append metrics to the respective lists
             for key in mean_metrics.keys():
                 mean_metrics[key].append(metrics[key])
+      
+            info_csv_path_sc = os.path.join(config["OUTPUT_CSV"],  f"info_ism_{obj_id}.csv"  )
+            info_results_df.to_csv(info_csv_path_sc, index=False)
+
             # print(im_id, best_iou)
 
         # Calculate mean metrics
@@ -167,7 +202,7 @@ def main(config):
         print("\n----------------\n")
 
         # Save to CSV
-        csv_path = os.path.join(config["RESULT_DIR"], config["OUTPUT_CSV"])
+        csv_path = os.path.join(config["OUTPUT_CSV"], 'ism_eval_score.csv')
     
         results_df.to_csv(csv_path, index=False)
 
@@ -178,7 +213,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/eval/run_eval_linemod.yaml",
+        default="configs/eval/run_eval_linemod_sam_rpd_aom.yaml",
         help="Path to eval config yaml file",
     )
 
