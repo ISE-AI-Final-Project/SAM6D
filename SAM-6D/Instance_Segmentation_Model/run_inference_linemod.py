@@ -58,7 +58,7 @@ def load_yaml(file_path):
         return yaml.safe_load(file)
 
 
-def visualize(rgb, detections, save_path="tmp.png"):
+def visualize(rgb, detections, save_path="detection_ism.png"):
     img = rgb.copy()
     gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
     img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)

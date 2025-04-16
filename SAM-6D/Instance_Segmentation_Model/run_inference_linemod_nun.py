@@ -362,7 +362,13 @@ if __name__ == "__main__":
 
         # Get number of image
         obj_data_path = os.path.join(config["DATA_DIR"], obj_id, "rgb")
-        num_image = len(os.listdir(obj_data_path))
+        num_image = len(
+            [
+                i
+                for i in os.listdir(obj_data_path)
+                if i.lower().endswith((".png", ".jpg", ".jpeg"))
+            ]
+        )
         print("Num Images", num_image)
 
         init_template(sam6d_model, template_dir=config["TEMPLATE_DIR"], obj_id=obj_id)

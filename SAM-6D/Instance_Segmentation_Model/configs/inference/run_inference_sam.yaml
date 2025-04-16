@@ -1,0 +1,2 @@
+SEGMENTOR_MODEL: sam # The segmentor model in ISM (sam , fastsam)
+STABILITY_SCORE_THRESH : 0.97 # stability_score_thresh of SAM

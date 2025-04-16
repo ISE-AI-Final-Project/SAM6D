@@ -1,12 +1,13 @@
-import torch
-import numpy as np
-import torchvision
-from torchvision.ops.boxes import batched_nms, box_area
 import logging
-from utils.inout import save_json, load_json, save_npz
-from utils.bbox_utils import xyxy_to_xywh, xywh_to_xyxy, force_binary_mask
 import time
+
+import numpy as np
+import torch
+import torchvision
 from PIL import Image
+from torchvision.ops.boxes import batched_nms, box_area
+from utils.bbox_utils import force_binary_mask, xywh_to_xyxy, xyxy_to_xywh
+from utils.inout import load_json, save_json, save_npz
 
 lmo_object_ids = np.array(
     [
@@ -160,9 +161,11 @@ class Detections:
         results = {
             "scene_id": scene_id,
             "image_id": frame_id,
-            "category_id": self.object_ids + 1
-            if dataset_name != "lmo"
-            else lmo_object_ids[self.object_ids],
+            "category_id": (
+                self.object_ids + 1
+                if dataset_name != "lmo"
+                else lmo_object_ids[self.object_ids]
+            ),
             "score": self.scores,
             "bbox": boxes,
             "time": runtime,
