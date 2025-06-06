@@ -83,7 +83,7 @@ test_dataset:
   template_dir: ../Data/BOP-Templates
   img_size: 224
   n_sample_observed_point: 2048
-  n_sample_model_point: 1024
+  n_sample_model_point: 2048
   n_sample_template_point: 5000
   minimum_n_point: 8
   rgb_mask_flag: True

@@ -1,0 +1,4 @@
+DATA_DIR: /workspace/Linemod_preprocessed/data
+RESULT_DIR: /workspace/SAM6D/SAM-6D/Data/linemod-ism-eval-sam
+OBJ_ID: [15] # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+OUTPUT_CSV: /workspace/nunny/scoring/score_01.csv

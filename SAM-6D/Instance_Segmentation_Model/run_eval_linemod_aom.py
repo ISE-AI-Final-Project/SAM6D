@@ -54,6 +54,36 @@ def calculate_iou(mask1, mask2):
     return iou
 
 
+def compute_hu_moments_normalized(binary_mask):
+    # Compute raw Hu Moments
+    moments = cv2.moments(binary_mask.astype(np.uint8))
+    hu_moments = cv2.HuMoments(moments).flatten()
+
+    # Apply the transformation
+    transformed_hu_moments = -np.sign(hu_moments) * np.log(np.abs(hu_moments) + 1e-10)  # Add small value to avoid log(0)
+    # Normalize to range [0, 1]
+    min_val, max_val = np.min(transformed_hu_moments), np.max(transformed_hu_moments)
+    normalized = (transformed_hu_moments - min_val) / (max_val - min_val + 1e-10)  # Avoid division by zero
+    return normalized
+
+
+def hu_moments_similarity(mask1, mask2):
+
+    distance = cv2.matchShapes(mask2, mask1, cv2.CONTOURS_MATCH_I2, 0)
+    
+    # Calculate similarity as squared difference
+    similarity = 1 - distance
+    
+    # similarity = 1 - np.sqrt(np.sum((hu1 - hu2)**2)) #1-distance
+    
+    return distance
+
+def newscore(geo,sem,appe,vis_r,hu):
+    
+    new_score = (sem + appe + (vis_r * geo) + hu ) / (1+1+vis_r+1)
+    return new_score
+
+
 def compute_metrics(mask1, mask2):
     """
     Compute IoU, Dice, Pixel Accuracy, Precision, Recall, Specificity from 2 masks
@@ -96,24 +126,37 @@ def main(config):
             "Recall",
             "Specificity",
             "Score",
-        ]
+        ])
 
     for obj_id in config["OBJ_ID"]:
+        
         info_results_df = pd.DataFrame(
         columns=[
             "Object_id",
             "Img_id",
-            "Mask_id",
-            "IoU",
-            "Score",
-            "Geo_scores",
-            "Sem_score",
-            "App_score"
-        ]
-    )
- 
+            "Mask_bestScore_id",
+            "bestScIoU",
+            "bestScore",
+            "Geo_bestscores",
+            "Sem_bestscore",
+            "App_bestscore",
+            "Vis_R_bestscore" ,
+            "Hu_bestscore" ,
+            "Newsc_bestscore" , 
+            "Mask_bestIou_id",
+            "bestiouIoU",
+            "bestiouScore",
+            "Geo_bestiouscores",
+            "Sem_bestiouscore",
+            "App_bestiouscore",
+            "Vis_R_bestiouscore",
+            "Hu_bestiouscore",
+            "Newsc_bestiouscore",
+        ] )
+        
         obj_id = str(obj_id).zfill(2)
-        obj_result_dir = os.path.join(config["RESULT_DIR"], "sam6d_results_01", obj_id)
+        obj_result_dir = os.path.join(config["RESULT_DIR"], "sam6d_results_02", obj_id)
+        obj_info_dir = os.path.join(config["RESULT_DIR"], "sam6d_results_02_02", obj_id)
 
         mean_metrics = {
             "IoU": [],
@@ -131,8 +174,11 @@ def main(config):
 
         num_images = len(detected_image_id)
         print(f"Evaluating OBJ: {obj_id} | {num_images} images.")
+        
+        a = [19, 53, 67, 70, 105, 223, 228, 234, 235, 257, 262, 313, 314, 315, 316, 389, 474, 509, 510, 513, 514, 555, 556, 562, 569, 573, 580, 592, 593, 700, 801, 804, 963, 965, 968, 1123, 247, 679]
 
-        for image_id in detected_image_id:
+        for image_id_num in a:
+            image_id = detected_image_id[image_id_num]
             # Mask gt
             mask_gt_path = os.path.join(
                 config["DATA_DIR"], obj_id, "mask", f"{image_id}.png"
@@ -145,47 +191,79 @@ def main(config):
             )
             results = np.load(npz_path)
 
+            npz_info_path = os.path.join(
+                obj_info_dir,
+                f"detection_{obj_id}_{image_id}.npz",
+            )
+
+            info = np.load(npz_info_path)
+
             # Best score mask
             best_iou = -1
             best_mask = None
-            # for mask_pred in results["segmentation"]:
-            #     iou = calculate_iou(mask_pred, mask_gt)
-
-            #     if best_iou < iou:
-            #         best_iou = iou
-            #         best_mask = mask_pred
-            best_idx = np.argmax(results['scores'])
+            mask_bestiou_id = 0
+            for mask_id in range(len(results["segmentation"])):
+                mask_pred = results["segmentation"][mask_id]
+                iou = calculate_iou(mask_pred, mask_gt)
+                if best_iou < iou:
+                    best_iou = iou
+                    best_mask = mask_pred
+                    mask_bestiou_id = mask_id
+                    
+            best_idx = np.argmax(results['score'])
             pred_mask = results['segmentation'][best_idx]
 
             mask_id = 0 
-            for mask_pred in results["segmentation"]:
-                iou = calculate_iou(mask_pred, mask_gt)
-                new_info =  { "Object_id": obj_id,
-                            "Img_id": img_id,  # Add corresponding values
-                            "Mask_id": mask_id,  # Add corresponding values
-                            "IoU": iou,
-                            "Score": mean_results.get("Score", None),
-                            "Geo_scores": mean_results.get("Geo_scores", None),
-                            "Sem_score": mean_results.get("Sem_score", None),
-                            "App_score": mean_results.get("App_score", None) }
-                              
-                info_results_df = pd.concat(
-                    [info_results_df, pd.DataFrame(new_info, index=[0])], ignore_index=True
-                
-                mask_id = mask_id + 1
+            best_sc_iou = calculate_iou(pred_mask, mask_gt)
+            best_iou_iou = calculate_iou(best_mask, mask_gt)
 
+            hu_sc_score = hu_moments_similarity(pred_mask, mask_gt)    
+            hu_iou_score = hu_moments_similarity(best_mask, mask_gt)
+
+            # geo,sem,appe,vis_r,hu
+            newbest_sc_iou = newscore(info['geometric'][best_idx],info['semantic'][best_idx], info['appearance'][best_idx],info['visible_ratio'][best_idx],hu_sc_score) 
+            
+            newbest_iou_iou = newscore(info['geometric'][mask_bestiou_id],info['semantic'][mask_bestiou_id], info['appearance'][mask_bestiou_id],info['visible_ratio'][mask_bestiou_id],hu_iou_score) 
+
+            new_info = {
+                            "Object_id": obj_id,                
+                            "Img_id": image_id,                   
+                            "Mask_bestScore_id": best_idx,  
+                            "bestScIoU": best_sc_iou,             
+                            "bestScore": results['score'][best_idx],  
+                            "Geo_bestscores": info['geometric'][best_idx],    
+                            "Sem_bestscore": info['semantic'][best_idx],     
+                            "App_bestscore": info['appearance'][best_idx],
+                            "Vis_R_bestscore" : info['visible_ratio'][best_idx],
+                            "Hu_bestscore" : hu_sc_score  , 
+                            "Newsc_bestscore" : newbest_sc_iou, 
+                            "Mask_bestIou_id": mask_bestiou_id,  
+                            "bestiouIoU": best_iou_iou,           
+                            "bestiouScore": results['score'][mask_bestiou_id],    
+                            "Geo_bestiouscores": info['geometric'][mask_bestiou_id],
+                            "Sem_bestiouscore": info['semantic'][mask_bestiou_id],  
+                            "App_bestiouscore": info['appearance'][mask_bestiou_id],  
+                            "Vis_R_bestiouscore" : info['visible_ratio'][mask_bestiou_id],
+                            "Hu_bestiouscore" : hu_iou_score, 
+                            "Newsc_bestiouscore" : newbest_iou_iou,
+                        }   
+            info_results_df = pd.concat(
+                    [info_results_df, pd.DataFrame(new_info, index=[0])], ignore_index=True)
     
             metrics = compute_metrics(pred_mask, mask_gt)
 
             # Append metrics to the respective lists
             for key in mean_metrics.keys():
                 mean_metrics[key].append(metrics[key])
-      
-            info_csv_path_sc = os.path.join(config["OUTPUT_CSV"],  f"info_ism_{obj_id}.csv"  )
-            info_results_df.to_csv(info_csv_path_sc, index=False)
 
-            # print(im_id, best_iou)
-
+        #save info path
+        info_csv_path = os.path.join(config["OUTPUT_CSV"])  
+        if not os.path.exists(info_csv_path):
+                os.makedirs(info_csv_path)
+            
+        info_csv_path_sc = os.path.join(config["OUTPUT_CSV"],  f"info_ism_{obj_id}.csv" )  
+        info_results_df.to_csv(info_csv_path_sc, index=False)
+        print("\n------save-info------\n")
         # Calculate mean metrics
         mean_results = {key: np.mean(value) for key, value in mean_metrics.items()}
 

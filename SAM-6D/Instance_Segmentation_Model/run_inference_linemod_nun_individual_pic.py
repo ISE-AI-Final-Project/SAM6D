@@ -5,7 +5,6 @@ import os
 import sys
 import time
 
-import math
 import cv2
 import distinctipy
 import imageio
@@ -15,19 +14,16 @@ import trimesh
 import yaml
 from hydra import compose, initialize
 from hydra.utils import instantiate
+from model.utils import Detections, convert_npz_to_json
 from omegaconf import OmegaConf
 from PIL import Image
+from segment_anything.utils.amg import rle_to_mask
 from skimage.feature import canny
 from skimage.morphology import binary_dilation
-import matplotlib.pyplot as plt
-
-from model.utils import Detections, convert_npz_to_json
-from segment_anything.utils.amg import rle_to_mask
 from utils.bbox_utils import CropResizePad
 from utils.poses.pose_utils import (
     get_obj_poses_from_template_level,
     load_index_level_in_level2,
-
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -99,90 +95,6 @@ def visualize(rgb, detections, save_path="tmp.png"):
     concat.paste(rgb, (0, 0))
     concat.paste(prediction, (img.shape[1], 0))
     return concat
-
-def visualize_image_allmask(obj_id,output_dir,image_id,rgb, detections, save_path="tmp.png"):
-    img = rgb.copy()
-    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-    img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-    colors = distinctipy.get_colors(len(detections))
-    alpha = 0.33
-
-    for mask_idx, det in enumerate(detections):
-            img = rgb.copy()
-            i_det = detections[mask_idx]
-            mask = rle_to_mask(i_det["segmentation"])
-            # edge = canny(mask)
-            # edge = binary_dilation(edge, np.ones((2, 2)))
-            # obj_id = i_det["category_id"]
-            # temp_id = obj_id - 1
-        
-            # r = int(255 * colors[temp_id][0])
-            # g = int(255 * colors[temp_id][1])
-            # b = int(255 * colors[temp_id][2])
-            # img[mask, 0] = alpha * r + (1 - alpha) * img[mask, 0]
-            # img[mask, 1] = alpha * g + (1 - alpha) * img[mask, 1]
-            # img[mask, 2] = alpha * b + (1 - alpha) * img[mask, 2]
-            # img[edge, :] = 255
-        
-            img = Image.fromarray(np.uint8(img))
-            # img.save(save_path)
-            # prediction = Image.open(save_path)
-        
-            # # concat side by side in PIL
-            img = np.array(img)
-            # concat = Image.new("RGB", (img.shape[1] + prediction.size[0], img.shape[0]))
-            # concat.paste(rgb, (0, 0))
-            # concat.paste(prediction, (img.shape[1], 0))
-
-            bbox = i_det['bbox']
-            score = i_det['score']
-
-            x, y, w, h = bbox
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 5)
-            
-            # Write the score on the top right of the bounding box
-
-            score_text = f"{score:.3f}"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.8
-            font_color = (0, 255, 0)  # Green
-            font_thickness = 2
-            text_size, _ = cv2.getTextSize(score_text, font, font_scale, font_thickness)
-            text_x = x + w - text_size[0]
-            text_y = y - 10 if y - 10 > 10 else y + 10 + text_size[1]
-            
-            cv2.putText(img, score_text, (text_x, text_y), font, font_scale, font_color, font_thickness)
-            fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-                
-            axes[0].imshow(img)
-            axes[0].axis('off')
-                
-            axes[1].imshow(mask, cmap = 'gray')
-            axes[1].axis('off')
-                
-            plt.tight_layout()
-                    
-    
-            obj_output_dir = os.path.join(output_dir, "sam6d_results_02", f"all{obj_id}", f"pic{image_id}" )
-            if not os.path.exists(obj_output_dir):
-                os.makedirs(obj_output_dir)
-    
-            plt.savefig(f"{obj_output_dir}/vis_ism_{image_id}_{mask_idx}.png")
-            plt.close()
-
-
-# rle: Dict[str, Any]
-def rle_to_mask(rle) -> np.ndarray:
-    h, w = rle["size"]
-    mask = np.empty(h * w, dtype=bool)
-    idx = 0
-    parity = False
-    for count in rle["counts"]:
-        mask[idx : idx + count] = parity
-        idx += count
-        parity ^= True
-    mask = mask.reshape(w, h)
-    return mask.transpose()  # Put in C order
 
 
 def batch_input_data(depth_path, cam_path, device, image_id="0001"):
@@ -295,19 +207,23 @@ def run_inference(
     def log(i, p=False):
         if p:
             print(i, time.time() - start)
-            return time.time()
+            start = time.time()
 
     # run inference
     rgb_path = os.path.join(data_dir, obj_id, "rgb", f"{image_id}.png")
     rgb = Image.open(rgb_path).convert("RGB")
     detections = model.segmentor_model.generate_masks(np.array(rgb))
+
+    # print(detections)
+    print(detections["masks"].shape, detections["boxes"].shape)
+
     # log(0)
     detections = Detections(detections)
-    start = log("Segment")
+    log("Segment")
     query_decriptors, query_appe_descriptors = model.descriptor_model.forward(
         np.array(rgb), detections
     )
-    start = log("Forward Desciptor")
+    log("Forward Desciptor")
 
     # matching descriptors
     (
@@ -317,7 +233,7 @@ def run_inference(
         best_template,
     ) = model.compute_semantic_score(query_decriptors)
 
-    start = log("Compute sem score")
+    log("Compute sem score")
 
     # update detections
     detections.filter(idx_selected_proposals)
@@ -327,20 +243,20 @@ def run_inference(
     appe_scores, ref_aux_descriptor = model.compute_appearance_score(
         best_template, pred_idx_objects, query_appe_descriptors
     )
-    start = log("Compute app score")
+    log("Compute app score")
 
     # compute the geometric score
     depth_path = os.path.join(data_dir, obj_id, "depth", f"{image_id}.png")
     cam_path = os.path.join(data_dir, obj_id, "info.yml")
     batch = batch_input_data(depth_path, cam_path, device, image_id=image_id)
-    start = log("Batch depth input")
+    log("Batch depth input")
 
     template_poses = get_obj_poses_from_template_level(level=2, pose_distribution="all")
     template_poses[:, :3, 3] *= 0.4
     poses = torch.tensor(template_poses).to(torch.float32).to(device)
     model.ref_data["poses"] = poses[load_index_level_in_level2(0, "all"), :, :]
 
-    start = log("Get obj pose")
+    log("Get obj pose")
     mesh_path = os.path.join(cad_dir, f"obj_{obj_id}.ply")
     mesh = trimesh.load_mesh(mesh_path)
     model_points = mesh.sample(2048).astype(np.float32) / 1000.0
@@ -348,13 +264,13 @@ def run_inference(
         torch.tensor(model_points).unsqueeze(0).data.to(device)
     )
 
-    start = log("Load mesh")
+    log("Load mesh")
 
     image_uv = model.project_template_to_image(
         best_template, pred_idx_objects, batch, detections.masks
     )
 
-    start = log("Project template")
+    log("Project template")
 
     geometric_score, visible_ratio = model.compute_geometric_score(
         image_uv,
@@ -363,64 +279,39 @@ def run_inference(
         ref_aux_descriptor,
         visible_thred=model.visible_thred,
     )
-    start = log("Compute geo score")
-    
+    log("Compute geo score")
+
     # final score
     # logging.info(f"Saving results OBJ:{obj_id} IMAGE:{image_id}")
+
     final_score = (semantic_score + appe_scores + geometric_score * visible_ratio) / (
         1 + 1 + visible_ratio
     )
-    final_score_2 = (semantic_score + appe_scores + geometric_score * visible_ratio) / (
-        1 + 1 + visible_ratio
-    )
 
-    # Apply logarithmic transformation to each score (adding 1 to avoid log(0) issues)
-    final_score_log = (torch.log(semantic_score + 1) + torch.log(appe_scores + 1) + visible_ratio * torch.log(geometric_score + 1)) / (1 + 1 + visible_ratio)
     detections.add_attribute("scores", final_score)
     detections.add_attribute("object_ids", torch.zeros_like(final_score))
 
     detections.to_numpy()
-    
-    info_01 = {
-        "obj_id": obj_id,
-        "picture_id": image_id,  
-        "semantic": semantic_score.cpu(), 
-        "geometric": geometric_score.cpu(),
-        "appearance": appe_scores.cpu(),
-        "visible_ratio" : visible_ratio.cpu(),
-        "final_score": final_score.cpu(),
-        "final_score_2" : final_score_2.cpu()
-    }
 
     # Create Folder
-    obj_output_dir = os.path.join(output_dir, "sam6d_results_02", obj_id)
+    obj_output_dir = os.path.join(output_dir, "sam6d_results", obj_id)
     if not os.path.exists(obj_output_dir):
         os.makedirs(obj_output_dir)
 
     save_path = os.path.join(obj_output_dir, f"detection_ism_{image_id}")
     detections.save_to_file(0, 0, 0, save_path, "Custom", return_results=False)
 
-    info_output_dir = os.path.join(output_dir, "sam6d_results_02_02", obj_id)
-    if not os.path.exists(info_output_dir):
-        os.makedirs(info_output_dir)
+    # Converot to json
+    # detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
+    # save_json_bop23(save_path + ".json", detections)
 
-    info_path = os.path.join(info_output_dir, f"detection_{obj_id}_{image_id}.npz")
-    np.savez(info_path, **info_01)
-    print(f"Results saved to {info_path}")
+    log("Save output")
 
-    start = log("Save output")
-    detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
-    visualize_image_allmask(obj_id,output_dir,image_id,rgb, detections)
+    if int(image_id) % visualize_every_n == 0:
+        detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
 
-    #Converot to json
-    #save_json_bop23(save_path + ".json", detections)
-
-
-    # if int(image_id) % visualize_every_n == 0:
-    #     detections = convert_npz_to_json(idx=0, list_npz_paths=[save_path + ".npz"])
-
-    #     vis_img = visualize(rgb, detections, f"{obj_output_dir}/vis_ism_{image_id}.png")
-    #     vis_img.save(f"{obj_output_dir}/vis_ism_{image_id}.png")
+        vis_img = visualize(rgb, detections, f"{obj_output_dir}/vis_ism_{image_id}.png")
+        vis_img.save(f"{obj_output_dir}/vis_ism_{image_id}.png")
 
 
 if __name__ == "__main__":
@@ -429,7 +320,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/inference/run_inference_linemod_rpd_sam_aom.yaml",
+        default="configs/inference/run_inference_linemod.yaml",
         help="Path to inference config yaml file",
     )
 
@@ -437,7 +328,7 @@ if __name__ == "__main__":
 
     config = load_yaml(args.config)
 
-    os.makedirs(os.path.join(config["OUTPUT_DIR"], "sam6d_results_02"), exist_ok=True)
+    os.makedirs(os.path.join(config["OUTPUT_DIR"], "sam6d_results"), exist_ok=True)
 
     sam6d_model, device = init_sam6d(
         config["SEGMENTOR_MODEL"],
@@ -450,12 +341,12 @@ if __name__ == "__main__":
 
         # Get number of image
         obj_data_path = os.path.join(config["DATA_DIR"], obj_id, "rgb")
-        num_image = len(os.listdir(obj_data_path)) - 2 
+        num_image = len(os.listdir(obj_data_path))
         print("Num Images", num_image)
 
         init_template(sam6d_model, template_dir=config["TEMPLATE_DIR"], obj_id=obj_id)
 
-        for img in progressbar(range(0, num_image), f"Inferencing OBJ {obj}: ", 40):
+        for img in progressbar(range(250, 251), f"Inferencing OBJ {obj}: ", 40):
             image_id = str(img).zfill(4)
             run_inference(
                 sam6d_model,
@@ -465,7 +356,7 @@ if __name__ == "__main__":
                 config["CAD_DIR"],
                 obj_id=obj_id,
                 image_id=image_id,
+                visualize_every_n=config["VISUALIZE_EVERY_N"],
             )
-            
 
             torch.cuda.empty_cache()

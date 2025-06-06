@@ -1,5 +1,4 @@
 DATA_DIR: /workspace/Linemod_preprocessed/data
-RESULT_DIR: /workspace/SAM6D/SAM-6D/Data/linemod-ism-eval-sam
-# RESULT_DIR: /workspace/aom/linemod-ism-eval-fastsam
-OBJ_ID: [1, 2, 4] # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
-OUTPUT_CSV: /workspace/aom/linemod-ism-eval-sam/round1
+RESULT_DIR: /workspace/aom/linemod-ism-eval-sam
+OBJ_ID: [1] # [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+OUTPUT_CSV: /workspace/aom/linemod-ism-eval-sam/round3

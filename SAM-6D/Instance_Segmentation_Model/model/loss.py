@@ -61,7 +61,7 @@ class MaskedPatch_MatrixSimilarity(nn.Module):
 
         return scores.clamp(min=0.0, max=1.0)
 
-    def compute_visible_ratio(self, query, reference, thred=0.5):
+    def compute_visible_ratio(self, query, reference, thred=0.3):
 
         sim_matrix = torch.matmul(query, reference.permute(0, 2, 1)) # N_query x N_query_mask x N_refer_mask
         sim_matrix = sim_matrix.max(1)[0] # N_query x N_refer_mask

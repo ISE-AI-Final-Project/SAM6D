@@ -183,9 +183,8 @@ def intersec_mask_rgbd(detection_rgb, detection_depth):
         new_id = ids[0]
         blank_canva[combined_mask] = new_id
 
-    all_detection = canva_to_detection(blank_canva)  
-    final_detection = union_detections(detection_rgb, all_detection)
-    return final_detection
+    detection = canva_to_detection(blank_canva)  
+    return detection
 
 
 def are_adjacent(mask1, mask2):
@@ -253,44 +252,6 @@ def canva_to_detection(blank_canva):
     # print(masks_tensor, len(masks_tensor))
     # print(boxes_tensor, len(boxes_tensor))
     return {"masks": masks_tensor, "boxes": boxes_tensor}
-
-
-def union_detections(detection_rgb, all_detection):
-    """
-    Unions the masks and boxes from detection_rgb and all_detection,
-    skipping those in all_detection that already exist in detection_rgb.
-    
-    """
-    # Get masks and boxes from both detections
-    masks_rgb = detection_rgb["masks"]
-    boxes_rgb = detection_rgb["boxes"]
-    masks_final = all_detection["masks"]
-    boxes_final = all_detection["boxes"]
-
-    # Start with RGB detection masks and boxes
-    combined_masks = [masks_rgb]
-    combined_boxes = [boxes_rgb]
-
-    # Skip duplicates
-    for i, mask_final in enumerate(masks_final):
-        is_duplicate = False
-        for mask_rgb in masks_rgb:
-            if torch.equal(mask_rgb, mask_final):
-                is_duplicate = True
-                break
-
-        if not is_duplicate:
-            # Add non-duplicate mask and corresponding box
-            combined_masks.append(mask_final.unsqueeze(0))  # Add as a single slice
-            combined_boxes.append(boxes_final[i].unsqueeze(0))  # Add as a single slice
-
-    # Stack all combined masks and boxes
-    combined_masks_tensor = torch.cat(combined_masks, dim=0) if combined_masks else torch.empty(0, *masks_rgb.shape[1:], dtype=torch.bool, device=masks_rgb.device)
-    combined_boxes_tensor = torch.cat(combined_boxes, dim=0) if combined_boxes else torch.empty(0, 4, dtype=torch.float32, device=boxes_rgb.device)
-
-    # Return the final union detection
-    return {"masks": combined_masks_tensor, "boxes": combined_boxes_tensor}
-
 
 
 def rescale_depth(arr):

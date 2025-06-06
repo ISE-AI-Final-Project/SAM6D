@@ -232,6 +232,9 @@ def run_inference(
     # Combine RGB and Depth
     detections_combined = intersec_mask_rgbd(detections, detections_depth)
 
+    # print(detections_combined)
+    # print(detections_combined['masks'].shape)
+
     # print(detections["masks"].shape, detections["boxes"].shape)
     # print(detections_depth["masks"].shape, detections_depth["boxes"].shape)
     # print(detections_combined["masks"].shape, detections_combined["boxes"].shape)
@@ -362,7 +365,8 @@ if __name__ == "__main__":
 
         # Get number of image
         obj_data_path = os.path.join(config["DATA_DIR"], obj_id, "rgb")
-        num_image = len(os.listdir(obj_data_path))
+        num_image = len([f for f in os.listdir(obj_data_path) if f.lower().endswith(".png")])
+        # num_image = len(os.listdir(obj_data_path))
         print("Num Images", num_image)
 
         init_template(sam6d_model, template_dir=config["TEMPLATE_DIR"], obj_id=obj_id)
