@@ -5,8 +5,6 @@ import os
 import sys
 import time
 
-from my_custom_socket import MyServer
-
 # Add the path to the Instance_Segmentation_Model directory to sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, "Instance_Segmentation_Model"))
@@ -120,8 +118,17 @@ if __name__ == "__main__":
         1.0,
     ]
 
-    K_2K = [542.290771484375, 0.0, 549.8480834960938, 0.0, 542.290771484375,
-    312.20489501953125, 0.0, 0.0, 1.0]
+    K_2K = [
+        542.290771484375,
+        0.0,
+        549.8480834960938,
+        0.0,
+        542.290771484375,
+        312.20489501953125,
+        0.0,
+        0.0,
+        1.0,
+    ]
 
     # Parse Argument
     parser = argparse.ArgumentParser()
@@ -135,47 +142,88 @@ if __name__ == "__main__":
     config = load_yaml(args.config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    ran_dict = {
+        "acnewash": -1,
+        "sunscreen": -1,
+        "lactose": -1,
+        "orange": -1,
+        "purple": -1,
+        "contactcleaning": 59,
+        # "cereal": 103,
+    }
+
+    # ran_dict = {}
+
+    OBJ_TEMPLATE_FOLDER = f"/home/icetenny/senior-2/senior_dataset/"
+
+    RGB_FOLDER = "/home/icetenny/senior-2/dataset/all/rgb"
+    DEPTH_FOLDER = "/home/icetenny/senior-2/dataset/all/depth"
+    OUTPUT_FOLDER = "/home/icetenny/senior-2/dataset/inference"
+
     # init sem ism
     sen_ism = SEN_ISM(
         config=config, device=device, path_parent="Instance_Segmentation_Model/"
     )
-    # print(sen_ism)
-    # print("HII")
 
-    # Init server
-    server = MyServer(host="127.0.0.1", port=11111, server_name="ISM Server")
-    server.start()
+    target_obj_list = os.listdir(OBJ_TEMPLATE_FOLDER)
+    image_list = os.listdir(RGB_FOLDER)
+    total_image = len(image_list)
 
-    while True:
-        # Wait for msg
-        recv_msg = server.wait_for_msg()
-        if recv_msg is not None:
-            # Receive Message
-            rgb_img, depth_img, target_obj, dataset_path_prefix = recv_msg
+    print(f"Object List includes {target_obj_list}")
 
-            obj_template_dir = os.path.join(dataset_path_prefix, target_obj, "templates")
+    for target_obj in target_obj_list:
+        start_index = ran_dict.get(target_obj, 0)
+        if start_index == -1:
+            continue
 
-            cad_path = os.path.join(
-                dataset_path_prefix, target_obj, f"{target_obj}_centered.ply"
+        print(f"Inferencing {target_obj}")
+
+        # os.makedirs(os.path.join(OUTPUT_FOLDER, target_obj, "sam"), exist_ok=True)
+        os.makedirs(os.path.join(OUTPUT_FOLDER, target_obj, "ours-depth-4"), exist_ok=True)
+
+        obj_template_dir = os.path.join(OBJ_TEMPLATE_FOLDER, target_obj, "templates")
+
+        cad_path = f"/home/icetenny/senior-2/senior_dataset/{target_obj}/{target_obj}_centered.ply"
+        # init template
+        sen_ism.init_template(obj_template_dir=obj_template_dir, cad_path=cad_path)
+        print(f"Init {target_obj} template finished.")
+
+        for i, image_id in enumerate(image_list[start_index:]):
+            print(f"\t{target_obj} : {i+start_index+1} / {total_image}")
+
+            rgb_path = os.path.join(RGB_FOLDER, image_id)
+            depth_path = os.path.join(DEPTH_FOLDER, image_id)
+
+            rgb_img = cv2.cvtColor(cv2.imread(rgb_path), cv2.COLOR_BGR2RGB)
+            depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+
+            depth_img[depth_img > 4000] = 0
+
+            cam_batch_info = batch_input_data(
+                depth=np.array(imageio.v2.imread(depth_path)).astype(np.int32),
+                K=K_1080,
+                device=device,
             )
 
-            cam_batch_info = batch_input_data(depth=depth_img, K=K_2K, device=device)
-
-            # Clip Depth for better depth segment
-            depth_img[depth_img > 2000] = 0
-
-            print(f"Received RGB Image with shape: {rgb_img.shape}")
-            print(f"Received Depth Image with shape: {depth_img.shape}")
-            print(f"Finding: {target_obj}")
-
-            # init template
-            sen_ism.init_template(obj_template_dir=obj_template_dir, cad_path=cad_path)
-
-            # Inference
-            # detections = sen_ism.run_inference(
-            #     rgb_img=rgb_img, depth_img=depth_img, batch_info=cam_batch_info
+            # # Inference Normal
+            # normal_detections = sen_ism.run_inference_no_depth(
+            #     rgb_img=rgb_img, batch_info=cam_batch_info
             # )
 
+            # best_score_normal = np.argmax(normal_detections.scores)
+            # best_mask_normal = normal_detections.masks[best_score_normal].astype(
+            #     np.uint8
+            # )
+            # best_box_normal = normal_detections.boxes[best_score_normal]
+
+            # print(
+            #     f"\t\tBest Score Normal: {best_score_normal} at bbox: {best_box_normal}"
+            # )
+
+            # normal_write_path = os.path.join(OUTPUT_FOLDER, target_obj, "sam", image_id)
+            # cv2.imwrite(normal_write_path, best_mask_normal * 255)
+
+            # Inference Ours
             detections, segmented_detections, depth_detections = sen_ism.run_inference(
                 rgb_img=rgb_img,
                 depth_img=depth_img,
@@ -183,43 +231,13 @@ if __name__ == "__main__":
                 return_all=True,
             )
 
-            print(
-                segmented_detections.masks.shape,
-                depth_detections.masks.shape,
-                detections.masks.shape,
-            )
-
-            output_combined_segmented_image = overlay_masks_boxes(
-                image=rgb_img,
-                masks=detections.masks,
-                bboxes=detections.boxes,
-                scores=detections.scores,
-                score_threshold=0,
-            )
-
-
             best_score = np.argmax(detections.scores)
             best_mask = detections.masks[best_score].astype(np.uint8)
             best_box = detections.boxes[best_score]
 
-            print(f"Best Score: {best_score} at bbox: {best_box}")
-            print(f"Best Mask type: {best_mask.dtype}")
+            print(f"\t\tBest Score With Depth: {best_score} at bbox: {best_box}")
 
-            # Send response
-            server.send_response(
-                msg_type_out=["numpyarray", "numpyarray", "float", "numpyarray"],
-                msg_out=[
-                    best_mask,
-                    best_box,
-                    best_score,
-                    output_combined_segmented_image,
-                ],
-            )
-
-            print(f"[{server.server_name}] Response Sent. Restarting.")
-            server.restart()
+            ours_write_path = os.path.join(OUTPUT_FOLDER, target_obj, "ours-depth-4", image_id)
+            cv2.imwrite(ours_write_path, best_mask * 255)
 
             torch.cuda.empty_cache()
-        else:
-            print(f"[{server.server_name}] Connection Lost. Restarting.")
-            server.restart()

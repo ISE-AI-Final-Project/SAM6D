@@ -21,7 +21,11 @@ from segment_anything.utils.amg import rle_to_mask
 from skimage.feature import canny
 from skimage.morphology import binary_dilation
 from utils.bbox_utils import CropResizePad
-from utils.depth_processing import depth_image_process, intersec_mask_rgbd
+from utils.depth_processing import (
+    depth_guide_merge,
+    depth_image_process,
+    intersec_mask_rgbd,
+)
 from utils.poses.pose_utils import (
     get_obj_poses_from_template_level,
     load_index_level_in_level2,
@@ -326,14 +330,15 @@ class SEN_ISM:
         else:
             return detections
 
-    def run_inference_no_depth(self, rgb_img, batch_info):
+    def run_inference_no_depth(self, rgb_img, batch_info, return_all=False):
         """
         Run inference, make sure to init_template first.
 
         Input:
             rgb_img: read with cv2.cvtColor( cv2.imread(rgb_path), cv2.COLOR_BGR2RGB)
             batch_info: dict with keys: "depth", "cam_intrinsic", "depth_scale"
-
+            return_all: If true, return detections, and segmented_detections
+                Else, return only detections.
 
         Return:
             detections: keys: "masks" , "boxes" , "scores" , "object_ids"
@@ -346,6 +351,10 @@ class SEN_ISM:
 
         # log(0)
         detections = Detections(detections_rgb)
+
+        # Clone all masks detection to return
+        segmented_detections = Detections(detections_rgb)
+        segmented_detections.to_numpy()
 
         # Forard Descriptor
         query_decriptors, query_appe_descriptors = self.model.descriptor_model.forward(
@@ -399,7 +408,121 @@ class SEN_ISM:
         detections.to_numpy()
 
         print(f"Finished inference in {time.time()-start}")
-        return detections
+        if return_all:
+            return detections, segmented_detections
+        else:
+            return detections
+        
+    def run_inference_depth_guide(self, rgb_img, depth_img, batch_info, rgb_segmentation, return_all=False):
+        """
+        Run inference, make sure to init_template first.
+
+        Input:
+            rgb_img: read with cv2.cvtColor( cv2.imread(rgb_path), cv2.COLOR_BGR2RGB)
+            depth_img: read with cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+            batch_info: dict with keys: "depth", "cam_intrinsic", "depth_scale"
+            rgb_segmentation: Detection
+            return_all: If true, return detections, segmented_detections, depth_detections
+                        Else, return only detections.
+        Return:
+            detections: Final Detection with keys: "masks" , "boxes" , "scores" , "object_ids"
+            segmented_detections: RGB Segmented with keys: "masks" , "boxes"
+            depth_detections: Depth Segmented with keys: "masks" , "boxes"
+        """
+        # Run inference
+        start = time.time()
+
+        # # run inference
+        # rgb_segmentation.to_torch()
+
+        # # Depth segment
+        # processed_depth = depth_image_process(depth_img)
+        # # detections_depth = self.model.segmentor_model.generate_masks(
+        # #     np.array(processed_depth)
+        # # )
+
+        # # Combine RGB and Depth
+        # detections_combined = intersec_mask_rgbd(detections_rgb, detections_depth)
+
+        # detections_combined_with_rgb = {
+        #     "masks": torch.cat(
+        #         (detections_combined["masks"], detections_rgb["masks"]), dim=0
+        #     ),
+        #     "boxes": torch.cat(
+        #         (detections_combined["boxes"], detections_rgb["boxes"]), dim=0
+        #     ),
+        # }
+
+        detections_combined_with_rgb = depth_guide_merge(depth_image=depth_img, rgb_detection=rgb_segmentation.masks, device=self.device)
+
+        # log(0)
+        # detections = Detections(detections_combined)
+        detections = Detections(detections_combined_with_rgb)
+        # detections.to_numpy()
+
+        # # Clone all masks detection to return
+        # segmented_detections = Detections(detections_rgb)
+        # segmented_detections.to_numpy()
+
+        # depth_detections = Detections(detections_depth)
+        # depth_detections.to_numpy()
+
+        # Forward Descriptor
+        query_decriptors, query_appe_descriptors = self.model.descriptor_model.forward(
+            rgb_img, detections
+        )
+
+        # matching descriptors
+        (
+            idx_selected_proposals,
+            pred_idx_objects,
+            semantic_score,
+            best_template,
+        ) = self.model.compute_semantic_score(query_decriptors)
+
+        # update detections
+        detections.filter(idx_selected_proposals)
+        query_appe_descriptors = query_appe_descriptors[idx_selected_proposals, :]
+
+        # compute the appearance score
+        appe_scores, ref_aux_descriptor = self.model.compute_appearance_score(
+            best_template, pred_idx_objects, query_appe_descriptors
+        )
+
+        # Get obj pose
+        template_poses = get_obj_poses_from_template_level(
+            level=2, pose_distribution="all"
+        )
+        template_poses[:, :3, 3] *= 0.4
+        poses = torch.tensor(template_poses).to(torch.float32).to(self.device)
+        self.model.ref_data["poses"] = poses[load_index_level_in_level2(0, "all"), :, :]
+        image_uv = self.model.project_template_to_image(
+            best_template, pred_idx_objects, batch_info, detections.masks
+        )
+
+        # Geo score
+        geometric_score, visible_ratio = self.model.compute_geometric_score(
+            image_uv,
+            detections,
+            query_appe_descriptors,
+            ref_aux_descriptor,
+            visible_thred=self.model.visible_thred,
+        )
+
+        # final score
+        final_score = (
+            semantic_score + appe_scores + geometric_score * visible_ratio
+        ) / (1 + 1 + visible_ratio)
+
+        detections.add_attribute("scores", final_score)
+        detections.add_attribute("object_ids", torch.zeros_like(final_score))
+        detections.to_numpy()
+
+        print(f"Finished inference in {time.time()-start}")
+        if return_all:
+            return detections
+        else:
+            return detections
 
     def save_detection(self, detections, save_path):
         detections.save_to_file(0, 0, 0, save_path, "Custom", return_results=False)

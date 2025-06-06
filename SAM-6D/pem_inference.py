@@ -124,6 +124,7 @@ def mask_to_rle_pytorch(tensor):
     """
     # Put in fortran order and flatten h,w
     b, h, w = tensor.shape
+    print("BHW", b,h,w)
     tensor = tensor.permute(0, 2, 1).flatten(1)
 
     # Compute change indices
@@ -148,6 +149,42 @@ def mask_to_rle_pytorch(tensor):
     return out
 
 
+def mask_to_cloud(depth_img, mask, K):
+    # convert Binary Mask and Depth to segmented Clouds
+    h, w = depth_img.shape
+    i, j = np.indices((h, w))
+    valid = (mask > 0) & (depth_img > 0)
+
+    z = depth_img[valid]
+    x = (j[valid] - K[0, 2]) * z / K[0, 0]
+    y = (i[valid] - K[1, 2]) * z / K[1, 1]
+
+    # Rescale based on the depth scale
+    points = np.stack((x, y, z), axis=-1) / 1000
+
+    # convert numpy points to clouds (Ready to be visualized)
+    point_cloud = o3d.geometry.PointCloud()
+    point_cloud.points = o3d.utility.Vector3dVector(points)
+    point_cloud.paint_uniform_color([0, 0, 1])
+    point_cloud.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+    return point_cloud
+
+
+def rle_to_mask(rle) -> np.ndarray:
+    # Convert run length from SAM6D to binary mask:
+    h, w = rle["size"]
+    print(f"H:{h}, W:{w}")
+    mask = np.empty(h * w, dtype=bool)
+    idx = 0
+    parity = False
+    for count in rle["counts"]:
+        mask[idx : idx + count] = parity
+        idx += count
+        parity ^= True
+    mask = mask.reshape(w, h)
+    return mask.transpose()
+
+
 def chamfer_distance(point_cloud1, point_cloud2):
     """
     Calculate the Chamfer Distance between two point clouds.
@@ -168,7 +205,6 @@ def chamfer_distance(point_cloud1, point_cloud2):
     # Average distances in both directions
     chamfer_dist = np.mean(distances1) + np.mean(distances2)
     return chamfer_dist
-
 
 
 def _get_template(path, cfg, tem_index=1):
@@ -224,6 +260,40 @@ def get_templates(path, cfg):
         all_tem_pts.append(torch.FloatTensor(tem_pts).unsqueeze(0).cuda())
     return all_tem, all_tem_pts, all_tem_choose
 
+def get_scene(rgb, depth, K, image_size):
+    # Recieve RGB, Depth, Cam_Intrinsic and return o3d pcd scene for visualization
+    o3d_rgb = o3d.geometry.Image(rgb)
+    o3d_depth = o3d.geometry.Image(depth)
+
+    rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(o3d_rgb, o3d_depth)
+
+    fx = K[0][0]
+    fy = K[1][1]
+    cx = K[0][2]
+    cy = K[1][2]
+
+    intrinsic = o3d.camera.PinholeCameraIntrinsic(
+        image_size[0], image_size[1], fx, fy, cx, cy
+    )
+    camera_intrinsic_matrix = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
+    intrinsic.intrinsic_matrix = camera_intrinsic_matrix
+
+    cam = o3d.camera.PinholeCameraParameters()
+    cam.intrinsic = intrinsic
+    cam.extrinsic = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+
+    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+        rgbd_image, cam.intrinsic, cam.extrinsic
+    )
+    pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+    return pcd
 
 def get_data(rgb, depth, cad_path, cam_path, segmented_img_list, cfg):
     cam_info = json.load(open(cam_path))
@@ -249,6 +319,7 @@ def get_data(rgb, depth, cad_path, cam_path, segmented_img_list, cfg):
     all_dets = []
 
     for mask in segmented_img_list:
+        print("Mask", mask.shape)
         tensor_mask = torch.tensor(mask, dtype=torch.uint8).unsqueeze(0)
         rle_mask = mask_to_rle_pytorch(tensor_mask)
 
@@ -555,7 +626,14 @@ if __name__ == "__main__":
         "Instance_Segmentation_Model/utils/poses/predefined_poses/obj_poses_level0.npy"
     )
 
+    rgb_path = "/home/icetenny/senior-2/results/Run-2025-04-24-22-24-41-03/Cap-22-25-26-32/rgb.png"
+    # depth_path = "/home/icetenny/senior-2/results/Run-2025-04-24-22-24-41-03/Cap-22-25-26-32/depth.png"
+    depth_path = "/home/icetenny/senior-2/test/depth_min_run3.png"
+    best_mask_path = "/home/icetenny/senior-2/results/Run-2025-04-24-22-24-41-03/Cap-22-25-26-32/22-30-03-73_best_mask_purple.png"
+
     cam_path = "zed2i_2K.json"
+    target_obj = "purple"
+    dataset_path_prefix = "/home/icetenny/senior-2/senior_dataset"
 
     cfg = init_cfg()
 
@@ -576,129 +654,161 @@ if __name__ == "__main__":
     model.eval()
     gorilla.solver.load_checkpoint(model=model, filename=sam_checkpoint)
 
-    server = MyServer(host="127.0.0.1", port=22222, server_name="SAM6D PEM Server")
-    server.start()
 
-    while True:
-        recv_msg = server.wait_for_msg()
-        if recv_msg is not None:
-            best_mask, rgb_image, depth_image, target_obj, dataset_path_prefix = (
-                recv_msg
-            )
+    rgb_image = cv2.cvtColor(cv2.imread(rgb_path), cv2.COLOR_BGR2RGB)
+    depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
 
-            print(f"[{server.server_name}] Target object: {target_obj}")
-            print(f"[{server.server_name}] Received mask shape: {best_mask.shape}")
-            print(
-                f"[{server.server_name}] Received RGB shape: {rgb_image.shape}, dtype: {rgb_image.dtype}"
-            )
-            print(
-                f"[{server.server_name}] Received depth shape: {depth_image.shape}, dtype: {depth_image.dtype}"
-            )
+    mask = cv2.imread(best_mask_path)[:,:,0]
+    mask[mask ==255] = 1
+    segmented_img_list = [mask]
 
-            template_path = os.path.join(dataset_path_prefix, target_obj, "templates")
-            cad_path = os.path.join(
-                dataset_path_prefix, target_obj, f"{target_obj}_centered.ply"
-            )
+    template_path = os.path.join(dataset_path_prefix, target_obj, "templates")
+    cad_path = os.path.join(
+        dataset_path_prefix, target_obj, f"{target_obj}_centered.ply"
+    )
 
-            res = get_pose(
-                cfg,
-                template_path,
-                model,
-                rgb_image,
-                depth_image,
-                cad_path,
-                cam_path,
-                segmented_img_list=[best_mask],
-            )
-            (
-                model_points,
-                segmented_clouds,
-                detections,
-                diameter,
-                pose_scores,
-                pred_rot,
-                pred_trans,
-                input_data,
-                img,
-            ) = res
+    res = get_pose(
+        cfg,
+        template_path,
+        model,
+        rgb_image,
+        depth_image,
+        cad_path,
+        cam_path,
+        segmented_img_list=segmented_img_list,
+    )
+    (
+        model_points,
+        segmented_clouds,
+        detections,
+        diameter,
+        pose_scores,
+        pred_rot,
+        pred_trans,
+        input_data,
+        img,
+    ) = res
 
-            Rotation = pred_rot[0]
-            Translation = pred_trans[0]
-            segmented_cloud = segmented_clouds[0].detach().cpu().numpy()
-            transformed_cloud = np.dot(model_points, Rotation.T) + Translation
-            chamfer_dis = chamfer_distance(transformed_cloud, segmented_cloud)
+    Rotation = pred_rot[0]
+    Translation = pred_trans[0]
+    segmented_cloud = segmented_clouds[0].detach().cpu().numpy()
+    transformed_cloud = np.dot(model_points, Rotation.T) + Translation
+    chamfer_dis = chamfer_distance(transformed_cloud, segmented_cloud)
 
-            print("Object's Diameter : {0}".format(diameter))
-            print("Chamfer Before : {0}".format(chamfer_dis))
+    print("Object's Diameter : {0}".format(diameter))
+    print("Chamfer Before : {0}".format(chamfer_dis))
 
-            dis = surface_distance(
-                cad_path=cad_path,
-                seg_cloud=segmented_cloud,
-                estimated_rotation=pred_rot[0],
-                estimated_translation=pred_trans[0],
-            )
-            print("Surface distance : {0}".format(dis))
+    dis = surface_distance(
+        cad_path=cad_path,
+        seg_cloud=segmented_cloud,
+        estimated_rotation=pred_rot[0],
+        estimated_translation=pred_trans[0],
+    )
+    print("Surface distance : {0}".format(dis))
 
-            icp_rotation = Rotation
-            icp_translation = Translation
-            if dis > diameter * 0.2:
-                eval_points, final_rot, final_trans = second_refine(
-                    cad_path=cad_path,
-                    pose_path=pose_path,
-                    seg_cloud=segmented_cloud,
-                    mul_cloud=model_points,
-                    num_point_cloud=1000,
-                )
-                eval_points, icp_rotation, icp_translation = feed_icp(
-                    model_points,
-                    segmented_cloud,
-                    cloud_to_process=model_points,
-                    pred_rot=final_rot,
-                    pred_trans=final_trans,
-                    threshold=0.001,
-                )
-            else:
-                eval_points, icp_rotation, icp_translation = feed_icp(
-                    model_points,
-                    segmented_cloud,
-                    cloud_to_process=model_points,
-                    pred_rot=pred_rot,
-                    pred_trans=pred_trans,
-                    threshold=0.001,
-                )
+    icp_rotation = Rotation
+    icp_translation = Translation
+    if dis > diameter * 0.2:
+        eval_points, final_rot, final_trans = second_refine(
+            cad_path=cad_path,
+            pose_path=pose_path,
+            seg_cloud=segmented_cloud,
+            mul_cloud=model_points,
+            num_point_cloud=1000,
+        )
+        eval_points, icp_rotation, icp_translation = feed_icp(
+            model_points,
+            segmented_cloud,
+            cloud_to_process=model_points,
+            pred_rot=final_rot,
+            pred_trans=final_trans,
+            threshold=0.001,
+        )
+    else:
+        eval_points, icp_rotation, icp_translation = feed_icp(
+            model_points,
+            segmented_cloud,
+            cloud_to_process=model_points,
+            pred_rot=pred_rot,
+            pred_trans=pred_trans,
+            threshold=0.001,
+        )
 
-            icp_cloud = np.dot(model_points, icp_rotation.T) + icp_translation
-            chamfer_dis = chamfer_distance(icp_cloud, segmented_cloud)
+    icp_cloud = np.dot(model_points, icp_rotation.T) + icp_translation
+    chamfer_dis = chamfer_distance(icp_cloud, segmented_cloud)
 
-            print("Chamfer_After : {0}".format(chamfer_dis))
-            detections[0]["score"] = float(pose_scores[0])
-            detections[0]["R"] = list(icp_rotation.tolist())
-            detections[0]["t"] = list(icp_translation.tolist())
+    print("Chamfer_After : {0}".format(chamfer_dis))
+    detections[0]["score"] = float(pose_scores[0])
+    detections[0]["R"] = list(icp_rotation.tolist())
+    detections[0]["t"] = list(icp_translation.tolist())
 
-            # Draw Result
-            valid_masks = pose_scores == pose_scores.max()
-            K = input_data["K"].detach().cpu().numpy()[valid_masks]
-            result_image = draw_detections(
-                cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-                pred_rot[valid_masks],
-                pred_trans[valid_masks],
-                model_points,
-                K,
-                color=(0, 255, 0),
-            )
+    # Draw Result
+    valid_masks = pose_scores == pose_scores.max()
+    K = input_data["K"].detach().cpu().numpy()[valid_masks]
+    result_image = draw_detections(
+        img,
+        pred_rot[valid_masks],
+        pred_trans[valid_masks],
+        model_points,
+        K,
+        color=(0, 255, 0),
+    )
 
-            Rounded_Rotation = np.round(icp_rotation, 6)
-            Rounded_Translation = np.round(icp_translation, 6)
+    Rounded_Rotation = np.round(icp_rotation, 6)
+    Rounded_Translation = np.round(icp_translation, 6)
 
-            server.send_response(
-                msg_type_out=["numpyarray", "numpyarray", "numpyarray"],
-                msg_out=[Rounded_Rotation, Rounded_Translation, result_image],
-            )
+    # Visualize
+    rgb_img = np.array(Image.open(rgb_path))
+    depth_img = np.array(Image.open(depth_path))
+    K = np.array(camera_data["cam_K"]).reshape((3, 3))
 
-            print(f"[{server.server_name}] Response Sent. Restarting.")
-            server.restart()
+    print(rgb_img.shape)
 
-            torch.cuda.empty_cache()
-        else:
-            print(f"[{server.server_name}] Connection Lost. Restarting.")
-            server.restart()
+    scene = get_scene(rgb_img, depth_img, K, (rgb_img.shape[1], rgb_img.shape[0]))
+    interested_clouds = o3d.geometry.PointCloud()
+    # predicted_clouds = o3d.geometry.PointCloud()
+    predicted_meshes = []
+    
+    print("Number of proposal : " + str(len(detections)))
+    for data in detections:
+        mask_img = rle_to_mask(data["segmentation"])
+        print(mask_img.shape, depth_image.shape)
+        interested_cloud = mask_to_cloud(depth_img, mask_img, K)
+
+        R = np.array(data["R"])
+        t = np.array(data["t"])
+
+        predicted_mesh = o3d.io.read_triangle_mesh(cad_path)
+        predicted_mesh.scale(1 / 1000, center=(0, 0, 0))
+
+        transformation_matrix = np.eye(4)
+        transformation_matrix[:3, :3] = R
+        transformation_matrix[:3, 3] = t
+
+        predicted_mesh.transform(transformation_matrix)
+        predicted_mesh.transform(
+            [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+        )
+        predicted_meshes.append(predicted_mesh)
+
+        # predicted_points = model_points.dot(R.T) + t
+
+        # predicted_cloud = o3d.geometry.PointCloud()
+        # predicted_cloud.points = o3d.utility.Vector3dVector(predicted_points)
+        # predicted_cloud.paint_uniform_color([1, 0, 0])
+        # predicted_cloud.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+
+        interested_clouds += interested_cloud
+
+    # o3d.visualization.draw_geometries([scene, interested_clouds] + predicted_meshes)
+    o3d.visualization.draw_geometries([scene] + predicted_meshes)
+
+    # server.send_response(
+    #     msg_type_out=["numpyarray", "numpyarray", "numpyarray"],
+    #     msg_out=[Rounded_Rotation, Rounded_Translation, result_image],
+    # )
+
+    # print(f"[{server.server_name}] Response Sent. Restarting.")
+    # server.restart()
+
+    # torch.cuda.empty_cache()
