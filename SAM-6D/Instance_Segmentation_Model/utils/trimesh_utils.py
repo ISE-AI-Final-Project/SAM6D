@@ -1,6 +1,6 @@
 import numpy as np
-import trimesh
 import torch
+import trimesh
 
 
 def load_mesh(path, ORIGIN_GEOMETRY="BOUNDS"):

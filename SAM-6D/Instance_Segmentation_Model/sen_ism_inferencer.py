@@ -458,6 +458,7 @@ class SEN_ISM:
         # log(0)
         # detections = Detections(detections_combined)
         detections = Detections(detections_combined_with_rgb)
+        torch.cuda.empty_cache()
         # detections.to_numpy()
 
         # # Clone all masks detection to return
